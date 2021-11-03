@@ -1,6 +1,6 @@
 # FaaSim
 
-Python event-driven simulator for cloud/edge serverless platforms
+Event-driven simulator for cloud/edge serverless platforms
 
 This simulator was created for academic and research purposes. This is an experimental version and its completeness and correctness are not guaranteed.
 
