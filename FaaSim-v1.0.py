@@ -111,12 +111,19 @@ def read_event_list():
 def initalize_resource_list():
 # We create three lists of resources for every zone:
 # idle_resources; allocated_resources; warming_up resources
-# Ej. idle_resources[z][r] --> resource r (warm) from zone z
-# idle_resources = [] # List of warm idle resources. One list per zone z. E.g.: idle_resources[z][r]
+# Ej. idle_resources[z][r] --> resource r (idle) from zone z
+#
+# idle_resources = [] # List of  idle (warm) resources. One list per zone z. E.g.: idle_resources[z][r]
+# An idle resource is a warm resource that is available for being allocated to execute a function invocation
+#
 # allocated_resources = [] # List of allocated resources. One list per zone z. E.g.: allocated_resources[z][r]
-# An allocated resource is a resource assigned to execute a function invocation (it include warm/cold start and busy states)
+# An allocated resource is a resource that has been selected for executing a function invocation (it includes warm/cold start and busy states)
+#
 # warmingup_resources = [] # List of warming up resources. One list per zone z. E.g.: warmingup_resources[z][r]
-# total_used_resources = [] # Total used resources per zone (warm + busy + warmingup)
+# Warmingup list is only used for implementing the adaptive pre-warming mechanism
+#
+# total_used_resources = [] # Total used resources per zone (idle + allocated + warmingup)
+#
     resource_id = 0
     for z in range(num_zones+1):
         idle_resources.append([])
