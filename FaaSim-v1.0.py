@@ -5,9 +5,9 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -16,20 +16,22 @@
 #
 #
 # IMPORTANT NOTE:
-# This simulator was created for academic and research purposes. 
+# This simulator was created for academic and research purposes.
 # This is an experimental version and its completeness and correctness are not guaranteed.
-# 
-# AUTHOR: 
+#
+# AUTHOR:
 # Rafael Moreno-Vozmediano, PhD.
 # Dept. of Computer Architecture
 # Facultad de Informática (Computer Science School)
 # Universidad Complutese de Madrid. SPAIN
 #
 
+
 import random
 import time
 
 class Event:
+    # Every event triggers a function invocation
     origin_zone = -1  # ID of the zone or region where the event is originated (Values 1, 2, ...)
     assigned_zone = -1 # ID of the zone or region assigned to execute the event (zone 0 is the cloud; zones 1, 2, 3 are edge zones)
     init_time = 0 # Time when the request arrives to the serverless platform (init_time + RTT/2)
@@ -41,9 +43,9 @@ class Event:
 
 
 class Resource:
-    busy_init_time = 0 # Time when the resource starts to be busy
-    busy_end_time = 0 # Time when the resource ends to be busy
-    warm_init_time = 0 # time when the resource start to be warm after booting or after being busy
+    allocated_init_time = 0 # Time when the resource is allocated to execute an event (function invocation). The resource can be cold or warm
+    allocated_end_time = 0 # Time when the resource ends the execution of the event (function invocation) an it is freed.
+    idle_init_time = 0 # time when a warm resource start to be idle after booting or after ending the execution of a function invocation
     warmingup_ready = 0 # Time when a warming-up resource is ready to be used
     keep_warm = 0 # If keep_warm==1 it is a pre-warmed resource (should never be cold-down)
 
@@ -108,20 +110,21 @@ def read_event_list():
 
 def initalize_resource_list():
 # We create three lists of resources for every zone:
-# warm_resources; busy_resources; warming_up resources
-# Ej. warm_resources[z][r] --> resource r (warm) from zone z
-# warm_resources = [] # List of warm resources. One list per zone z. E.g.: warm_resources[z][r]
-# busy_resources = [] # List of busy resources. One list per zone z. E.g.: busy_resources[z][r]
+# idle_resources; allocated_resources; warming_up resources
+# Ej. idle_resources[z][r] --> resource r (warm) from zone z
+# idle_resources = [] # List of warm idle resources. One list per zone z. E.g.: idle_resources[z][r]
+# allocated_resources = [] # List of allocated resources. One list per zone z. E.g.: allocated_resources[z][r]
+# An allocated resource is a resource assigned to execute a function invocation (it include warm/cold start and busy states)
 # warmingup_resources = [] # List of warming up resources. One list per zone z. E.g.: warmingup_resources[z][r]
 # total_used_resources = [] # Total used resources per zone (warm + busy + warmingup)
     resource_id = 0
     for z in range(num_zones+1):
-        warm_resources.append([])
-        busy_resources.append([])
+        idle_resources.append([])
+        allocated_resources.append([])
         warmingup_resources.append([])
         resource_usage_time.append(0)
+        resource_allocated_time.append(0) # Allocated time includes the resource startup (cold or warm) + busy time (execution)
         resource_busy_time.append(0)
-        resource_exec_time.append(0)
         resource_idle_time.append(0)
         number_of_cold_starts.append(0)
         if z < num_zones: # warm resources in edge zones
@@ -131,9 +134,9 @@ def initalize_resource_list():
         for r in range(prewarming):
             resource = Resource()
             resource.boot_time = 0
-            resource.warm_init_time = 0
+            resource.idle_init_time = 0
             resource.keep_warm = 1
-            warm_resources[z].append(resource)
+            idle_resources[z].append(resource)
         resource_usage_num_avg.append([])
         resource_usage_num_max.append([])
         for t in range(sim_time):
@@ -144,14 +147,14 @@ def initalize_resource_list():
 def sched_policy_0(event):
 # Policy 0 --> schedule first in the local edge zone
 # If there are no resources available in the local zone, the schedule in the cloud
-# If there are warm resources, we move the resource from "warm" to "busy" list
+# If there are warm resources, we move the resource from "warm" to "allocated" list
 # Else a new resource is booted
 # It returns the assigned zone, and the end_time of the execution of the task in the assigned zone
 
     zone = event.origin_zone
 
     # First, we check if there are enough free resources in the local zone
-    if len(busy_resources[zone]) < max_edge_resources: # Schedule in the local edge zone
+    if len(allocated_resources[zone]) < max_edge_resources: # Schedule in the local edge zone
         assigned_zone = zone
     else: # Schedule in the cloud zone
         assigned_zone = cloud_zone
@@ -162,7 +165,7 @@ def sched_policy_0(event):
 def sched_policy_1(event):
 # Policy 1 --> schedule first where there are warm resources (cloud or edge), then in the local zone
 # If there are no resources available in the local zone, the schedule in the cloud
-# If there are warm resources, we move the resource from "warm" to "busy" list
+# If there are warm resources, we move the resource from "warm" to "allocated" list
 # Else a new resource is booted
 # It returns the assigned zone, and the end_time of the execution of the task in the assigned zone
 
@@ -170,10 +173,10 @@ def sched_policy_1(event):
 
 # First, we check if there are enough free resources in the local zone
     assigned = 0
-    if len(busy_resources[zone]) < max_edge_resources: # There are free resources in the local zone
-        if len(warm_resources[zone]) > 1: # There are warm resources in the local edge zone
+    if len(allocated_resources[zone]) < max_edge_resources: # There are free resources in the local zone
+        if len(idle_resources[zone]) > 1: # There are warm resources in the local edge zone
             assigned_zone = zone
-        elif len(warm_resources[num_zones]) > 1: # There are warm resources in the cloud zone
+        elif len(idle_resources[num_zones]) > 1: # There are warm resources in the cloud zone
             assigned_zone = cloud_zone
         else: # No warm resources available ==> then boot a cold resource from local zone
             assigned_zone = zone
@@ -185,7 +188,7 @@ def sched_policy_1(event):
 def allocate_resource(event):
     global sim_end_time
 # This function allocate a resource from the assigned zone for executing the event
-# If there is some warm resource available, it is selected
+# If there is some idle (warm) resource available, it is selected
 # Otherwise, if there is some warming-up resource, it is selected
 # Otherwise, a new (cold) resource is booted
 
@@ -202,15 +205,15 @@ def allocate_resource(event):
     else: # Schedule in the cloud zone
         rtt_latency = (cloud_rtt_latency * (1 + random.uniform(-1, 1) * cloud_rtt_variance / 100))/1000
 
-    # Look for a warm resource in the assigned zone.
-    if len(warm_resources[assigned_zone]) > 0:
-        resource = warm_resources[assigned_zone].pop(0)
+    # Look for an Idle (warm) resource in the assigned zone.
+    if len(idle_resources[assigned_zone]) > 0:
+        resource = idle_resources[assigned_zone].pop(0)
         end_time = init_time + float(exec + warm_start) / 1000.0
-    #  If no warm resource found, we first look for any warming-up resource in the assigned zone.
+    #  If no idle (warm) resource found, we first look for any warming-up resource in the assigned zone.
     elif len(warmingup_resources[assigned_zone]) > 0:
         resource = warmingup_resources[assigned_zone].pop(0)
         end_time = max(resource.warmingup_ready, init_time) + float(exec + warm_start) / 1000.0
-    #  If no warm nor warming-up resource found, the we start a new (cold) resource in the assigned zone.
+    #  If no idle nor warming-up resource found, the we start a new (cold) resource in the assigned zone.
     else:
         resource = Resource()
         end_time = init_time + float(exec + cold_start) / 1000.0
@@ -218,11 +221,11 @@ def allocate_resource(event):
         resource.keep_warm = 0 # It is not a pre-warmed resource
         number_of_cold_starts[assigned_zone] = number_of_cold_starts[assigned_zone] + 1
 
-    resource.busy_init_time = init_time
-    resource.busy_end_time = end_time
-    busy_resources[assigned_zone].append(resource)
-    resource_busy_time[assigned_zone] = resource_busy_time[assigned_zone] + end_time - init_time
-    resource_exec_time[assigned_zone] = resource_exec_time[assigned_zone] + float(exec)/1000.0
+    resource.allocated_init_time = init_time
+    resource.allocated_end_time = end_time
+    allocated_resources[assigned_zone].append(resource)
+    resource_allocated_time[assigned_zone] = resource_allocated_time[assigned_zone] + end_time - init_time
+    resource_busy_time[assigned_zone] = resource_busy_time[assigned_zone] + float(exec)/1000.0
 
     event.end_time = end_time
     event.total_time = end_time - init_time
@@ -236,39 +239,39 @@ def allocate_resource(event):
 
 def update_resource_list(time):
 # This function checks:
-#  - if some busy resource should pass to warm
-#  - if any  booting (warming up) resources should pass to warm
-#  - if any warm resources should be shut-down
+#  - if some allocated resource should pass to idle (warm)
+#  - if any  booting (warming up) resources should pass to idle (warm)
+#  - if any idle resources should be shut-down (terminated)
 
 
     for z in range(num_zones+1):
-        # Check if any busy resources should pass to warm
+        # Check if any allocated resources should pass to widle (warm)
         i = 0
-        while i < len(busy_resources[z]):
-            if time > (busy_resources[z][i].busy_end_time + reuse_interval/1000):
-                resource = busy_resources[z].pop(i) # the resource pass to warm list
-                resource.warm_init_time = resource.busy_end_time + reuse_interval/1000
-                warm_resources[z].append(resource)
+        while i < len(allocated_resources[z]):
+            if time > (allocated_resources[z][i].allocated_end_time + reuse_interval/1000):
+                resource = allocated_resources[z].pop(i) # the resource pass to idle list
+                resource.idle_init_time = resource.allocated_end_time + reuse_interval/1000
+                idle_resources[z].append(resource)
             else:
                 i = i + 1
-        # Check if any  booting (warming up) resources should pass to warm
+        # Check if any  booting (warming up) resources should pass to idle
         i = 0
         while i < len(warmingup_resources[z]):
             if time > warmingup_resources[z][i].warmingup_ready:
-                resource = warmingup_resources[z].pop(i)  # the resource pass to warm list
-                resource.warm_init_time = resource.warmingup_ready
-                warm_resources[z].append(resource)
+                resource = warmingup_resources[z].pop(i)  # the resource pass to idle list
+                resource.idle_init_time = resource.warmingup_ready
+                idle_resources[z].append(resource)
             else:
                 i = i + 1
 
-        # Check if any warm resources should be cold-down according to pre-warming policies
+        # Check if any idle resources should be shut-down (terminated) according to pre-warming policies
         # Pre-warming policy 0 --> Fixed pre-warming ==> Pre-warmed resources (with keep_warm==1) are never cold-down
         if prewarming_policy == 0:
             i = 0
-            while i < len(warm_resources[z]):
-                cold_down_time = warm_resources[z][i].warm_init_time + float(keep_alive_interval) / 1000.0
-                if (warm_resources[z][i].keep_warm == 0) and (time > cold_down_time):
-                    resource = warm_resources[z].pop(i)  # the resource pass to cold state and it is removed from any list
+            while i < len(idle_resources[z]):
+                cold_down_time = idle_resources[z][i].idle_init_time + float(keep_alive_interval) / 1000.0
+                if (idle_resources[z][i].keep_warm == 0) and (time > cold_down_time):
+                    resource = idle_resources[z].pop(i)  # the resource pass to cold state and it is removed from any list
                     resource_usage_time[z] = resource_usage_time[z] + (cold_down_time - resource.boot_time)
                 else:
                     i = i + 1
@@ -279,17 +282,17 @@ def update_resource_list(time):
                 prewarming = min(edge_prewarming, max_edge_resources)
             else:
                 prewarming = cloud_prewarming
-            diff = prewarming - (len(warm_resources[z]) + len(warmingup_resources[z]))
-            if diff < 0:  # Check if some warm resource can be cold down
+            diff = prewarming - (len(idle_resources[z]) + len(warmingup_resources[z]))
+            if diff < 0:  # Check if some idle resource can be shut-down (terminated)
                 max_cold_down = - diff  # no more than max_cold_down resources should be cold down to guarantee prewarming
                 cold_down = 0
                 i = 0
-                while i < len(warm_resources[z]):
-                    cold_down_time = warm_resources[z][i].warm_init_time + float(keep_alive_interval) / 1000.0
-                    if (warm_resources[z][i].keep_warm == 0) and (time > cold_down_time):
-                        resource = warm_resources[z].pop(i)  # the resource pass to cold state and it is remove from any list
+                while i < len(idle_resources[z]):
+                    cold_down_time = idle_resources[z][i].idle_init_time + float(keep_alive_interval) / 1000.0
+                    if (idle_resources[z][i].keep_warm == 0) and (time > cold_down_time):
+                        resource = idle_resources[z].pop(i)  # the resource pass to cold state and it is remove from any list
                         resource_usage_time[z] = resource_usage_time[z] + (cold_down_time - resource.boot_time)
-                        #   resource_idle_time[z] = resource_idle_time[z] + (time - resource.warm_init_time)
+                        #   resource_idle_time[z] = resource_idle_time[z] + (time - resource.idle_init_time)
                         cold_down = cold_down + 1
                     else:
                         i = i + 1
@@ -327,7 +330,7 @@ def process_event(time, event_num):
     # Compute how many resources are being used when this event is processed
     # then add this number to the total number of resources used in this zone, to compute, later, the average
     for z in range(num_zones+1):
-        num_used_resources = len(warmingup_resources[z]) + len(warm_resources[z]) + len(busy_resources[z])
+        num_used_resources = len(warmingup_resources[z]) + len(idle_resources[z]) + len(allocated_resources[z])
         resource_usage_num_avg[z][time] = resource_usage_num_avg[z][time] + num_used_resources
         resource_usage_num_max[z][time] = num_used_resources
 
@@ -337,46 +340,45 @@ def compute_resource_usage():
 
     # Compute first resource usage time per zone
     total_usage_time = 0
-    total_busy_time = 0
+    total_allocated_time = 0
     total_idle_time = 0
-    total_exec_time = 0
+    total_busy_time = 0
     total_number_of_cold_starts = 0
-    # Update the resource usage with the resources that remain warm or warming-up at the end of the simulation
+    # Update the resource usage with the resources that remain idle or warming-up at the end of the simulation
     for z in range(num_zones+1):
-        for i in range(len(warm_resources[z])):
-            resource_usage_time[z] = resource_usage_time[z] + (sim_end_time - warm_resources[z][i].boot_time)
-         #   resource_idle_time[z] = resource_idle_time[z] + (sim_end_time - warm_resources[z][i].warm_init_time)
+        for i in range(len(idle_resources[z])):
+            resource_usage_time[z] = resource_usage_time[z] + (sim_end_time - idle_resources[z][i].boot_time)
         for i in range(len(warmingup_resources[z])):
             resource_usage_time[z] = resource_usage_time[z] + (sim_end_time - warmingup_resources[z][i].boot_time)
         # print("Resource usage time for zone", z, "-->", resource_usage_time[z], "s")
         resource_usage_time[z] =  float(resource_usage_time[z])/3600.0 # Pass seconds to hours
+        resource_allocated_time[z] =  float(resource_allocated_time[z])/3600.0 # Pass seconds to hours
         resource_busy_time[z] =  float(resource_busy_time[z])/3600.0 # Pass seconds to hours
-        resource_exec_time[z] =  float(resource_exec_time[z])/3600.0 # Pass seconds to hours
-        resource_idle_time[z] = resource_usage_time[z] - resource_busy_time[z]
+        resource_idle_time[z] = resource_usage_time[z] - resource_allocated_time[z]
 
         total_usage_time = total_usage_time + resource_usage_time[z] # in hours
-        total_busy_time = total_busy_time + resource_busy_time[z] # in hours
+        total_allocated_time = total_allocated_time + resource_allocated_time[z] # in hours
         total_idle_time = total_idle_time + resource_idle_time[z]  # in hours
-        total_exec_time = total_exec_time + resource_exec_time[z]  # in hours
-        total_startup_time = total_busy_time - total_exec_time  # in hours
+        total_busy_time = total_busy_time + resource_busy_time[z]  # in hours
+        total_startup_time = total_allocated_time - total_busy_time  # in hours
         total_number_of_cold_starts = total_number_of_cold_starts + number_of_cold_starts[z]
 
     for z in range(num_zones + 1):
         resource_usage_time[z] = round(resource_usage_time[z], 2)
-        resource_busy_time[z] = round(resource_busy_time[z], 2)
+        resource_allocated_time[z] = round(resource_allocated_time[z], 2)
         resource_idle_time[z] = round(resource_idle_time[z], 2)
     print("\n")
     print("Total Resource usage time per zone:")
     print(resource_usage_time, "hours") # in hours
-    print("Total resource busy time per zone (includes execution + start-up time):")
-    print(resource_busy_time, "hours") # in hours
+    print("Total resource allocated time per zone (includes busy + start-up times):")
+    print(resource_allocated_time, "hours") # in hours
     print("Total resource idle time per zone:")
     print(resource_idle_time, "hours")  # in hours
     print("\n")
 
     print("Total resource usage time -->", "{:.2f}".format(total_usage_time), "hours")
     print("Total resource startup time -->", "{:.2f}".format(total_startup_time), "hours")
-    print("Total resource exec time -->", "{:.2f}".format(total_exec_time), "hours")
+    print("Total resource busy time -->", "{:.2f}".format(total_busy_time), "hours")
     print("Total resource idle time -->", "{:.2f}".format(total_idle_time), "hours")
     print("\nTotal number of cold starts -->", total_number_of_cold_starts)
 
@@ -453,7 +455,7 @@ def simulation():
     print("  - Max. task response time --> ", "{:.2f}".format(max_client_time), "ms")
 
 
-def store_event():
+def store_output():
 # This function stores each processed event into a output file
 # The output file contains, for each event, the response time for the platform and for the client
     file = open('event_output.txt', 'w')
@@ -501,7 +503,7 @@ edge_prewarming = 0 # resources prewarmed per edge zone
 cloud_prewarming = 160 # resources prewarmed in the central cloud
 # Keep_alive period (for instance reuse mechanism)
 keep_alive_interval = 30000 # If a warm resource is unused for this period (in ms), the resource is cold down
-reuse_interval = 0 # When a warm resource becomes idle, it can be reused after this interval
+reuse_interval = 0 # When a busy resource passes to idle, it can be reused after this interval
 
 # Resource limit
 max_edge_resources = 1000000 # Max. number of resources available at each edge zone
@@ -526,15 +528,15 @@ cloud_rtt_variance = 5 # Variance (%) applied to cloud RTT latencies
 #   (e.g. for 4 zones: zones #0, #1, #2, #3 are the edge zones;  and zone #4 is the cloud)
 event_list = []
 resource_list = []
-warm_resources = [] # List of warm resources. One list per zone z. E.g.: warm_resources[z][r]
-busy_resources = [] # List of busy resources. One list per zone z. E.g.: busy_resources[z][r]
+idle_resources = [] # List of idle (warm) resources. One list per zone z. E.g.: idle_resources[z][r]
+allocated_resources = [] # List of allocated resources. One list per zone z. E.g.: allocated_resources[z][r]
 warmingup_resources = [] # List of warming up resources. One list per zone z. E.g.: warmingup_resources[z][r]
-resource_usage_time = [] # Total resource usage time per zone (idle + exec + startup states)
-resource_busy_time = [] # Total resource busy time per zone (includes exec+startup state)
-resource_exec_time = [] # Total resource execution time per zone (include only execution time)
-resource_idle_time = [] # Total idle resource time per zone (only idle state)
-resource_usage_num_avg = [] # Average number of resources used every second per zone (warm + busy + warmingup)
-resource_usage_num_max = [] # Max number of resources used every second per zone (warm + busy + warmingup)
+resource_usage_time = [] # Total resource usage time per zone (idle + busy + startup states)
+resource_allocated_time = [] # Total resource allocated time per zone (includes busy and startup times)
+resource_busy_time = [] # Total resource busy time per zone (include only execution time)
+resource_idle_time = [] # Total idle (warm) resource time per zone (only idle state)
+resource_usage_num_avg = [] # Average number of resources used every second per zone (warm + allocated + warmingup)
+resource_usage_num_max = [] # Max number of resources used every second per zone (warm + allocated + warmingup)
 number_of_cold_starts = [] # Number od cold starts per zone
 
 # START THE MAIN CODE
@@ -544,15 +546,15 @@ now = time.time()
 sim_time = int(read_event_list())
 initalize_resource_list()
 
-execution_time = time.time() - now
+elapsed_time = time.time() - now
 
-print("Done (", "{:.2f}".format(execution_time), "s.)")
+print("Done (", "{:.2f}".format(elapsed_time), "s.)")
 print("Starting Simulation ......")
 now = time.time()
 
 # Perform the simulation
 simulation()
 
-execution_time = time.time() - now
-print("(Simulation time:", "{:.2f}".format(execution_time), "s.)")
-store_event()
+elapsed_time = time.time() - now
+print("(Simulator run time:", "{:.2f}".format(elapsed_time), "s.)")
+store_output()
