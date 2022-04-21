@@ -32,9 +32,9 @@ import time
 
 class Event:
     # Every event triggers a function invocation
-    origin_zone = -1  # ID of the zone or region where the event is originated (Values 1, 2, ...)
+    origin_zone = -1  # ID of the zone or region where the event is originated (zone 0 is the cloud; zones 1, 2, 3 are edge zones)
     assigned_zone = -1 # ID of the zone or region assigned to execute the event (zone 0 is the cloud; zones 1, 2, 3 are edge zones)
-    init_time = 0 # Time when the request arrives to the serverless platform (init_time + RTT/2)
+    init_time = 0 # Time when the request arrives to the serverless platform
     end_time = 0 # Time when the execution of the request ends in the serverless platform
     total_time = 0 # Total response time for the serverless platform point of view: total_time = end_time - init_time
     rtt = 0 # RTT observed for this request
