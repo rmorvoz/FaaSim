@@ -43,6 +43,7 @@ class Event:
 
 
 class Resource:
+    # A resource is a serverless instance used to execute one or more invocations of a function
     allocated_init_time = 0 # Time when the resource is allocated to execute an event (function invocation). The resource can be cold or warm
     allocated_end_time = 0 # Time when the resource ends the execution of the event (function invocation) an it is freed.
     idle_init_time = 0 # time when a warm resource start to be idle after booting or after ending the execution of a function invocation
@@ -487,8 +488,8 @@ sim_end_time = 0 # Time when the last event finish its execution
 
 #INPUT DATA
 create_input_data = 0   # If 0 --> read default input data file (event_list.txt)
-                        # If 1 --> create a new input data file according to the next parameters: sim_time and events_per_second
-sim_time = 10           # If create_input_data==1, use this sim_time
+                        # If 1 --> create a new input data file (event_list.txt) according to the next parameters: sim_time and events_per_second
+sim_time = 10           # If create_input_data==1, use this sim_time (in seconds)
 events_per_second = 100   # Create an input event_list.txt file with this number of events_per_second (uniformly distributed) and sim_time duration
 
 num_zones = 5
